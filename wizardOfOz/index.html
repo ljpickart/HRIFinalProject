@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Robot Messages</title>
+  <style>
+    body {
+      max-width: 800px;
+      margin: 30px auto;
+      padding: 0 16px;
+      font-family: Arial, sans-serif;
+    }
+
+    #messages {
+      height: 400px;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+
+    .message {
+      margin-bottom: 12px;
+    }
+
+    .received {
+      color: #1565c0;
+    }
+
+    .sent {
+      color: #2e7d32;
+    }
+
+    .timestamp {
+      color: #666;
+      font-size: 12px;
+      margin-right: 8px;
+    }
+
+    #messageForm {
+      display: flex;
+      gap: 8px;
+    }
+
+    #messageInput {
+      flex: 1;
+      padding: 8px;
+    }
+
+    button {
+      padding: 8px 16px;
+    }
+
+    #status {
+      min-height: 20px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>Robot Messages</h1>
+  <div id="status">Connecting...</div>
+  <div id="messages"></div>
+
+  <form id="messageForm">
+    <input id="messageInput" type="text" placeholder="Enter text to send" autocomplete="off">
+    <button type="submit">Send</button>
+  </form>
+
+  <script>
+    const messagesElement = document.getElementById('messages');
+    const messageForm = document.getElementById('messageForm');
+    const messageInput = document.getElementById('messageInput');
+    const statusElement = document.getElementById('status');
+
+    // Use the same host and port that served this webpage.
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new WebSocket(`${protocol}//${location.host}/?dashboard=true`);
+
+    // Add a timestamped message to the webpage.
+    function showMessage(message) {
+      const item = document.createElement('div');
+      item.className = `message ${message.direction}`;
+
+      const timestamp = document.createElement('span');
+      timestamp.className = 'timestamp';
+      timestamp.textContent = new Date(message.timestamp).toLocaleTimeString();
+
+      const direction = message.direction === 'received' ? 'Received' : 'Sent';
+      const text = document.createTextNode(`${direction}: ${message.text}`);
+
+      item.append(timestamp, text);
+      messagesElement.appendChild(item);
+      messagesElement.scrollTop = messagesElement.scrollHeight;
+    }
+
+    // Show socket connection changes.
+    socket.addEventListener('open', () => {
+      statusElement.textContent = 'Connected';
+    });
+
+    socket.addEventListener('close', () => {
+      statusElement.textContent = 'Disconnected';
+    });
+
+    socket.addEventListener('error', () => {
+      statusElement.textContent = 'Connection error';
+    });
+
+    // Display messages received from the robot.
+    socket.addEventListener('message', (event) => {
+      showMessage(JSON.parse(event.data));
+    });
+
+    // Send typed text to the server and then to the robot.
+    messageForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const text = messageInput.value.trim();
+
+      if (!text || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      socket.send(JSON.stringify({ text }));
+      messageInput.value = '';
+      messageInput.focus();
+    });
+  </script>
+</body>
+</html>
