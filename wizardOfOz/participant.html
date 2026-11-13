@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robot status</title>
+  <style>
+    :root {
+      --bg: #f5f3ee;
+      --ink: #16213e;
+      --muted: #6b6e78;
+      --card: #ffffff;
+      --line: #d9d5cb;
+      --track: #ebe8e1;
+      --thinking: #5f6675;
+      --converging: #2b78b8;
+      --overthinking: #c8642a;
+      --take: #b93a2c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      user-select: none;
+    }
+
+    main {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 48px;
+      width: min(760px, 92vw);
+    }
+
+    #waiting {
+      margin: 0;
+      color: var(--muted);
+      font-size: 30px;
+      text-align: center;
+    }
+
+    .card {
+      width: 100%;
+      padding: 36px 40px 44px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--card);
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    #state {
+      padding: 8px 24px;
+      border-radius: 999px;
+      color: #ffffff;
+      font-size: 32px;
+      font-weight: 600;
+    }
+
+    #clock {
+      color: var(--muted);
+      font-size: 32px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #bar-area {
+      margin-top: 76px;
+    }
+
+    /* The robot icon rides just above the bar at its leading edge. */
+    #robot {
+      position: absolute;
+      bottom: calc(100% + 12px);
+      left: 0%;
+      width: 48px;
+      height: 48px;
+      transform: translateX(-50%);
+      transition: left 0.25s ease, color 0.25s ease;
+    }
+
+    #robot svg,
+    #robot img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .bar {
+      position: relative;
+      height: 26px;
+      border-radius: 13px;
+      background: var(--track);
+    }
+
+    #fill {
+      width: 0%;
+      height: 100%;
+      border-radius: 13px;
+      transition: width 0.25s ease, background-color 0.25s ease;
+    }
+
+    #mark {
+      position: absolute;
+      top: -9px;
+      width: 3px;
+      height: 44px;
+      margin-left: -1px;
+      background: var(--ink);
+    }
+
+    #mark-label {
+      position: absolute;
+      top: 42px;
+      transform: translateX(-50%);
+      color: var(--muted);
+      font-size: 17px;
+      white-space: nowrap;
+    }
+
+    #takeover {
+      padding: 28px 80px;
+      border: none;
+      border-radius: 18px;
+      background: var(--take);
+      color: #ffffff;
+      font: inherit;
+      font-size: 40px;
+      font-weight: 600;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    #takeover:active {
+      transform: scale(0.98);
+    }
+
+    #taken {
+      margin: 0;
+      font-size: 32px;
+      line-height: 1.4;
+      text-align: center;
+    }
+
+    #taken span {
+      color: var(--muted);
+      font-size: 24px;
+    }
+
+    #connection {
+      position: fixed;
+      right: 16px;
+      bottom: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p id="waiting">Waiting for the next question</p>
+
+    <section id="window" class="card" hidden>
+      <div class="status-row">
+        <span id="state">Thinking</span>
+        <span id="clock">0:00</span>
+      </div>
+      <div id="bar-area" hidden>
+        <div class="bar">
+          <div id="robot">
+            <svg id="robot-drawing" viewBox="0 0 48 48" aria-hidden="true">
+              <line x1="24" y1="5" x2="24" y2="13" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+              <circle cx="24" cy="5" r="3.5" fill="currentColor"/>
+              <rect x="3" y="21" width="6" height="11" rx="2.5" fill="currentColor"/>
+              <rect x="39" y="21" width="6" height="11" rx="2.5" fill="currentColor"/>
+              <rect x="8" y="13" width="32" height="28" rx="9" fill="currentColor"/>
+              <circle cx="18" cy="25" r="4.5" fill="#ffffff"/>
+              <circle cx="30" cy="25" r="4.5" fill="#ffffff"/>
+              <rect x="18" y="33" width="12" height="3" rx="1.5" fill="#ffffff"/>
+            </svg>
+            <img id="robot-picture" alt="" hidden>
+          </div>
+          <div id="fill"></div>
+          <div id="mark"></div>
+          <span id="mark-label">answers here</span>
+        </div>
+      </div>
+    </section>
+
+    <button id="takeover" type="button" hidden>Take over</button>
+
+    <p id="taken" hidden>You've taken over.<br><span>Answer the question yourself.</span></p>
+  </main>
+
+  <div id="connection"></div>
+
+  <script>
+    // Wording and colours for the robot's states, in one place so the team can change them.
+    const STATE_LABELS = {
+      THINKING: 'Thinking',
+      CONVERGING: 'Converging',
+      OVERTHINKING: 'Overthinking',
+    };
+    const STATE_COLORS = {
+      THINKING: 'var(--thinking)',
+      CONVERGING: 'var(--converging)',
+      OVERTHINKING: 'var(--overthinking)',
+    };
+    // Where the "answers here" mark sits on the progress bar (percent).
+    const ANSWER_MARK = 80;
+
+    const element = (id) => document.getElementById(id);
+    let socket = null;
+    let snapshot = null;
+    let currentSeq = null;   // which trial the local timer belongs to
+    let localStart = 0;      // performance.now() when that trial started on this screen
+    let lockedSeq = null;    // trial this screen has already taken over
+    let pendingTakeover = null;
+    let robotPictureRequested = false;
+
+    element('mark').style.left = `${ANSWER_MARK}%`;
+    element('mark-label').style.left = `${ANSWER_MARK}%`;
+
+    function connect() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${protocol}//${location.host}/?role=participant`);
+
+      socket.addEventListener('open', () => {
+        element('connection').textContent = '';
+        // A press made while the connection was down is delivered now, with its original time.
+        if (pendingTakeover) {
+          socket.send(JSON.stringify(pendingTakeover));
+          pendingTakeover = null;
+        }
+      });
+
+      socket.addEventListener('message', (event) => {
+        const message = JSON.parse(event.data);
+        if (message.type === 'snapshot') {
+          applySnapshot(message);
+        }
+      });
+
+      socket.addEventListener('close', () => {
+        element('connection').textContent = 'Reconnecting…';
+        setTimeout(connect, 1000);
+      });
+    }
+
+    function applySnapshot(message) {
+      const trial = message.trial;
+      // A new trial (or the first view after a reload): start the local timer from the
+      // server's elapsed time, so a reloaded page continues instead of restarting.
+      if (trial && trial.seq !== currentSeq) {
+        currentSeq = trial.seq;
+        localStart = performance.now() - (trial.elapsedMs || 0);
+      }
+      snapshot = message;
+      render();
+      tick();
+    }
+
+    function render() {
+      const trial = snapshot && snapshot.trial;
+      const running = Boolean(trial && trial.active);
+      const takenOver = running && (trial.takenOver || lockedSeq === trial.seq);
+      const showWindow = running && !takenOver && snapshot.condition !== 'none';
+
+      element('waiting').hidden = running;
+      element('takeover').hidden = !running || takenOver;
+      element('taken').hidden = !takenOver;
+      element('window').hidden = !showWindow;
+      element('bar-area').hidden = !(showWindow && snapshot.condition === 'detailed');
+
+      if (showWindow) {
+        const color = STATE_COLORS[trial.state] || STATE_COLORS.THINKING;
+        element('state').textContent = STATE_LABELS[trial.state] || trial.state;
+        element('state').style.background = color;
+        element('fill').style.width = `${trial.progress}%`;
+        element('fill').style.background = color;
+        element('robot').style.left = `${trial.progress}%`;
+        element('robot').style.color = color;
+      }
+
+      // Swap the built-in drawing for the team's own picture when the server has one.
+      if (snapshot && snapshot.robotIcon && !robotPictureRequested) {
+        robotPictureRequested = true;
+        element('robot-picture').addEventListener('load', () => {
+          element('robot-picture').hidden = false;
+          element('robot-drawing').style.display = 'none';
+        });
+        element('robot-picture').src = snapshot.robotIcon;
+      }
+    }
+
+    function tick() {
+      const trial = snapshot && snapshot.trial;
+      if (!trial || !trial.active) {
+        return;
+      }
+      const seconds = Math.floor((performance.now() - localStart) / 1000);
+      element('clock').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    }
+
+    setInterval(tick, 200);
+
+    element('takeover').addEventListener('click', (event) => {
+      const trial = snapshot && snapshot.trial;
+      if (!trial || !trial.active || lockedSeq === trial.seq) {
+        return;
+      }
+      // The moment of the click, measured on this screen, so network delay never enters the number.
+      const now = event.timeStamp > 0 && event.timeStamp <= performance.now()
+        ? event.timeStamp
+        : performance.now();
+      const clientElapsedMs = Math.round(now - localStart);
+
+      lockedSeq = trial.seq;
+      render();
+
+      const message = { type: 'takeover', trialSeq: trial.seq, clientElapsedMs };
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message));
+      } else {
+        pendingTakeover = message;
+      }
+    });
+
+    connect();
+  </script>
+</body>
+</html>

@@ -3,6 +3,9 @@ const http = require('http');
 const path = require('path');
 const WebSocket = require('ws');
 
+// Participant page and transparency-window control (see windowHub.js).
+const windowHub = require('./windowHub');
+
 // Port used for both the webpage and WebSocket connections.
 const PORT = process.env.PORT || 8080;
 
@@ -14,6 +17,11 @@ const httpServer = http.createServer((request, response) => {
   if (request.method === 'GET' && request.url === '/') {
     response.setHeader('Content-Type', 'text/html');
     response.end(fs.readFileSync(pagePath));
+    return;
+  }
+
+  // /participant and /control pages.
+  if (windowHub.handleHttp(request, response)) {
     return;
   }
 
@@ -93,6 +101,11 @@ socketServer.on('connection', (socket, request) => {
     return;
   }
 
+  // Participant page (?role=participant) and control page (?role=control).
+  if (windowHub.handleConnection(socket, request)) {
+    return;
+  }
+
   // All non-dashboard clients are treated as robot clients.
   robotClients.add(socket);
   console.log('Robot connected');
@@ -117,4 +130,6 @@ socketServer.on('connection', (socket, request) => {
 httpServer.listen(PORT, () => {
   console.log(`Dashboard: http://localhost:${PORT}`);
   console.log(`WebSocket: ws://localhost:${PORT}`);
+  console.log(`Participant page: http://localhost:${PORT}/participant`);
+  console.log(`Control page: http://localhost:${PORT}/control`);
 });
