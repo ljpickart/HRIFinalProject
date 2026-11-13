@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Participant screen control</title>
+  <style>
+    body {
+      max-width: 980px;
+      margin: 24px auto;
+      padding: 0 20px;
+      background: #f7f6f2;
+      color: #16213e;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 22px;
+    }
+
+    .sub {
+      margin: 0 0 18px;
+      color: #6b6e78;
+      font-size: 14px;
+    }
+
+    section {
+      margin-bottom: 14px;
+      padding: 14px 16px;
+      border: 1px solid #ddd9d0;
+      border-radius: 12px;
+      background: #ffffff;
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .row + .row {
+      margin-top: 12px;
+    }
+
+    button,
+    input[type="text"],
+    select {
+      padding: 7px 12px;
+      border: 1px solid #b9b5ab;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #16213e;
+      font: inherit;
+      font-size: 14px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button.primary {
+      border-color: #2b78b8;
+      background: #2b78b8;
+      color: #ffffff;
+    }
+
+    button.current {
+      border-color: #16213e;
+      background: #16213e;
+      color: #ffffff;
+    }
+
+    input[type="range"] {
+      width: 280px;
+    }
+
+    kbd {
+      padding: 0 4px;
+      border: 1px solid currentColor;
+      border-radius: 4px;
+      font-family: Consolas, monospace;
+      font-size: 11px;
+      opacity: 0.7;
+    }
+
+    #alert {
+      display: none;
+      margin-bottom: 14px;
+      padding: 14px 16px;
+      border: 1px solid #e3a296;
+      border-radius: 12px;
+      background: #fcebe8;
+      color: #8e2a1f;
+      font-size: 19px;
+      font-weight: 600;
+    }
+
+    #events {
+      max-height: 280px;
+      margin: 0;
+      padding: 0;
+      overflow: auto;
+      list-style: none;
+      font-family: Consolas, monospace;
+      font-size: 12.5px;
+    }
+
+    #events li {
+      padding: 3px 0;
+      border-bottom: 1px solid #f0eee9;
+    }
+
+    .muted {
+      color: #6b6e78;
+    }
+
+    .ok {
+      color: #1e7b45;
+    }
+
+    .bad {
+      color: #b3261e;
+    }
+
+    code {
+      font-size: 12.5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Participant screen control</h1>
+  <p class="sub">Drives the participant page at <code>/participant</code>. Robot speech stays on the original wizard page at <code>/</code>.</p>
+
+  <div id="alert"></div>
+
+  <section>
+    <div class="row">
+      <span id="server" class="bad">Connecting to the server…</span>
+      <span class="muted">·</span>
+      <span id="screens" class="bad">No participant screen connected</span>
+    </div>
+    <div class="row muted" style="font-size: 13px;">Log file: <code id="logFile">created at the first event</code></div>
+  </section>
+
+  <section>
+    <div class="row">
+      <label>Participant ID <input id="participantId" type="text" size="10" placeholder="P01" autocomplete="off"></label>
+      <button id="setParticipant" type="button">Set</button>
+      <label style="margin-left: 18px;">Condition
+        <select id="condition">
+          <option value="none">None (no window)</option>
+          <option value="basic">Basic (state and time)</option>
+          <option value="detailed">Detailed (state, time and progress bar)</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section>
+    <div class="row">
+      <button id="start" class="primary" type="button">Start thinking <kbd>S</kbd></button>
+      <button id="end" type="button">End trial <kbd>E</kbd></button>
+      <span id="trialInfo" class="muted">No trial running</span>
+    </div>
+    <div class="row">
+      <span class="muted">State</span>
+      <button type="button" data-state="THINKING">Thinking <kbd>1</kbd></button>
+      <button type="button" data-state="CONVERGING">Converging <kbd>2</kbd></button>
+      <button type="button" data-state="OVERTHINKING">Overthinking <kbd>3</kbd></button>
+    </div>
+    <div class="row">
+      <span class="muted">Progress</span>
+      <input id="progress" type="range" min="0" max="100" step="1" value="0">
+      <span id="progressValue">0%</span>
+      <span class="muted" style="font-size: 13px;">shown in the detailed condition only</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="muted" style="margin-bottom: 6px;">Events (newest first)</div>
+    <ul id="events"></ul>
+  </section>
+
+  <script>
+    const element = (id) => document.getElementById(id);
+    let socket = null;
+    let status = null;
+    let trialSeq = null;
+    let trialStartLocal = 0;
+    let alertedSeq = null;
+    let lastProgressSent = 0;
+
+    function connect() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${protocol}//${location.host}/?role=control`);
+
+      socket.addEventListener('open', () => {
+        element('server').textContent = 'Server connected';
+        element('server').className = 'ok';
+      });
+
+      socket.addEventListener('close', () => {
+        element('server').textContent = 'Server disconnected, retrying…';
+        element('server').className = 'bad';
+        setTimeout(connect, 1000);
+      });
+
+      socket.addEventListener('message', (event) => {
+        const message = JSON.parse(event.data);
+        if (message.type === 'status') {
+          applyStatus(message);
+        } else if (message.type === 'event') {
+          addEvent(message);
+        } else if (message.type === 'error') {
+          addEvent({ time: new Date().toISOString(), event: 'not done', value: message.message });
+        }
+      });
+    }
+
+    function command(cmd, value, extra = {}) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ cmd, value, ...extra }));
+      }
+    }
+
+    function applyStatus(message) {
+      status = message;
+      const count = message.participantsConnected;
+      element('screens').textContent = count
+        ? `${count} participant screen${count > 1 ? 's' : ''} connected`
+        : 'No participant screen connected';
+      element('screens').className = count ? 'ok' : 'bad';
+      if (message.logFile) {
+        element('logFile').textContent = message.logFile;
+      }
+      if (document.activeElement !== element('participantId')) {
+        element('participantId').value = message.participantId || '';
+      }
+      element('condition').value = message.condition;
+
+      const trial = message.trial;
+      if (trial && trial.seq !== trialSeq) {
+        trialSeq = trial.seq;
+        trialStartLocal = performance.now() - (trial.elapsedMs || 0);
+        element('alert').style.display = 'none';
+        document.title = 'Participant screen control';
+      }
+      document.querySelectorAll('[data-state]').forEach((button) => {
+        button.classList.toggle('current', Boolean(trial && trial.active && button.dataset.state === trial.state));
+      });
+      if (trial && document.activeElement !== element('progress')) {
+        element('progress').value = trial.progress;
+        element('progressValue').textContent = `${trial.progress}%`;
+      }
+      if (trial && trial.takeover && alertedSeq !== trial.seq) {
+        alertedSeq = trial.seq;
+        const onScreen = (trial.takeover.clientElapsedMs / 1000).toFixed(1);
+        const byServer = (trial.takeover.serverElapsedMs / 1000).toFixed(1);
+        element('alert').textContent = `Trial ${trial.id}: participant took over at ${onScreen} s (server clock ${byServer} s)`;
+        element('alert').style.display = 'block';
+        document.title = `Take over at ${onScreen} s`;
+      }
+      renderTrialInfo();
+    }
+
+    function renderTrialInfo() {
+      const trial = status && status.trial;
+      if (!trial) {
+        element('trialInfo').textContent = 'No trial running';
+        return;
+      }
+      if (!trial.active) {
+        element('trialInfo').textContent = `Trial ${trial.id} ended at ${(trial.elapsedMs / 1000).toFixed(1)} s`;
+        return;
+      }
+      const seconds = ((performance.now() - trialStartLocal) / 1000).toFixed(1);
+      element('trialInfo').textContent = `Trial ${trial.id} running · ${seconds} s${trial.takenOver ? ' · taken over' : ''}`;
+    }
+
+    setInterval(renderTrialInfo, 100);
+
+    function addEvent(entry) {
+      const parts = [
+        entry.time ? new Date(entry.time).toLocaleTimeString([], { hour12: false }) : '',
+        entry.trialId ? `trial ${entry.trialId}` : '',
+        entry.event,
+        entry.value !== '' && entry.value !== undefined ? String(entry.value) : '',
+        entry.clientElapsedMs !== '' && entry.clientElapsedMs !== undefined ? `screen ${entry.clientElapsedMs} ms` : '',
+        entry.serverElapsedMs !== '' && entry.serverElapsedMs !== undefined ? `server ${entry.serverElapsedMs} ms` : '',
+      ].filter(Boolean);
+      const item = document.createElement('li');
+      item.textContent = parts.join('  ·  ');
+      element('events').prepend(item);
+      while (element('events').children.length > 100) {
+        element('events').lastChild.remove();
+      }
+    }
+
+    element('setParticipant').addEventListener('click', () => command('set_participant', element('participantId').value));
+    element('participantId').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        command('set_participant', element('participantId').value);
+      }
+    });
+    element('condition').addEventListener('change', () => command('set_condition', element('condition').value));
+    element('start').addEventListener('click', () => command('start_trial'));
+    element('end').addEventListener('click', () => command('end_trial'));
+    document.querySelectorAll('[data-state]').forEach((button) => {
+      button.addEventListener('click', () => command('set_state', button.dataset.state));
+    });
+
+    // While dragging, update the participant's bar about ten times a second without logging;
+    // the value where the slider is released is logged.
+    element('progress').addEventListener('input', () => {
+      element('progressValue').textContent = `${element('progress').value}%`;
+      const now = performance.now();
+      if (now - lastProgressSent > 100) {
+        lastProgressSent = now;
+        command('set_progress', Number(element('progress').value), { final: false });
+      }
+    });
+    element('progress').addEventListener('change', () => command('set_progress', Number(element('progress').value)));
+
+    // Keyboard shortcuts, except while typing in a field.
+    document.addEventListener('keydown', (event) => {
+      const tag = event.target.tagName;
+      if ((tag === 'INPUT' && event.target.type === 'text') || tag === 'SELECT' || event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      const shortcuts = {
+        s: () => command('start_trial'),
+        e: () => command('end_trial'),
+        1: () => command('set_state', 'THINKING'),
+        2: () => command('set_state', 'CONVERGING'),
+        3: () => command('set_state', 'OVERTHINKING'),
+      };
+      const action = shortcuts[event.key.toLowerCase()];
+      if (action) {
+        event.preventDefault();
+        action();
+      }
+    });
+
+    connect();
+  </script>
+</body>
+</html>
