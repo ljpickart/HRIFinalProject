@@ -1,0 +1,3 @@
+node_modules/
+# Participant event logs: study data, never commit them to the public repo.
+wizardOfOz/logs/
